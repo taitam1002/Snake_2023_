@@ -1,0 +1,605 @@
+C51 COMPILER V9.60.0.0   SADD                                                              12/13/2023 16:07:46 PAGE 1   
+
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE SADD
+OBJECT MODULE PLACED IN .\Objects\sadd.obj
+COMPILER INVOKED BY: C:\Keil_v5\C51\BIN\C51.EXE sadd.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND PRINT(.\Listings\sadd
+                    -.lst) TABS(2) OBJECT(.\Objects\sadd.obj)
+
+line level    source
+
+   1          #include <reg51.h>
+   2          #include <intrins.h>
+   3          #include <stdlib.h>
+   4          
+   5          sbit SRCLK = P3 ^ 6;
+   6          sbit RCLK = P3 ^ 5;
+   7          sbit SER = P3 ^ 4;
+   8          
+   9          sbit LEFT = P3 ^ 1;
+  10          sbit RIGHT = P3 ^ 0;
+  11          sbit UP = P3 ^ 2;
+  12          sbit DOWN = P3 ^ 3;
+  13          
+  14          #define COMMONPORTS P0
+  15          #define SEGs P2
+  16          
+  17          sbit beep = P2 ^ 5;
+  18          
+  19          // unsigned char code COL[8] = {0x7f, 0xbf, 0xdf, 0xef, 0xf7, 0xfb, 0xfd, 0xfe};
+  20          unsigned char code COL[8] = {0xfe, 0xfd, 0xfb, 0xf7, 0xef, 0xdf, 0xbf, 0x7f};
+  21          // unsigned char code ROW[8] = {0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01};
+  22          unsigned char code ROW[8] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80};
+  23          
+  24          unsigned char snakeLength = 1;
+  25          unsigned char snakeX[31] = {4};
+  26          unsigned char snakeY[31] = {0};
+  27          unsigned char foodX, foodY;
+  28          // 0: up, 1: down, 2: left; 3: right
+  29          unsigned char direction = 0;
+  30          unsigned int timecount = 40000;
+  31          unsigned char count;
+  32          unsigned char level;
+  33          unsigned char score;
+  34          
+  35          unsigned char code DIG_CODE[10] = {0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f};
+  36          // DB     0H,0H,24H,0BDH,24H,0H,0H,00H
+  37          // DB     0H,24H,3CH,0A5H,3CH,24H,0H,00H
+  38          // DB     0H,3CH,0H,0BDH,0H,3CH,0H,00H
+  39          // DB     18H,24H,24H,10H,8H,24H,24H,18H
+  40          unsigned char code levelcode[4][8] =
+  41              {
+  42                  {0x00, 0x00, 0x24, 0xBD, 0x24, 0x00, 0x00, 0x00},
+  43                  {0x00, 0x24, 0x3C, 0xA5, 0x3C, 0x24, 0x00, 0x00},
+  44                  {0x00, 0x3C, 0x00, 0xBD, 0x00, 0x3C, 0x00, 0x00},
+  45                  {0x18, 0x24, 0x24, 0x10, 0x08, 0x24, 0x24, 0x18}
+  46          };
+  47          // 32H,23H,0H,40H,0E6H,0C9H,49H,32H
+  48          unsigned char code logo[8] = {0x32, 0x23, 0x00, 0x40, 0xE6, 0xE9, 0x49, 0x32};
+  49          // DB     30H,48H,3DH,7FH,7FH,3DH,48H,30H
+  50          unsigned char code win[8] = {0x30, 0x48, 0x3D, 0x7F, 0x7F, 0x3D, 0x48, 0x30};
+  51          
+  52          void delay(unsigned int);
+  53          void Hc595SendByte(unsigned char);
+  54          
+C51 COMPILER V9.60.0.0   SADD                                                              12/13/2023 16:07:46 PAGE 2   
+
+  55          void displaySnake();
+  56          void moveSnake();
+  57          void controlSnake();
+  58          
+  59          char snakeFood();
+  60          void eatBeep(int , int);
+  61          void snakeGrow();
+  62          void snakeDeath();
+  63          
+  64          void displaySnakeLogo(unsigned char[]);
+  65          void loading();
+  66          void timeInit();
+  67          
+  68          void displayLevel(unsigned char);
+  69          void levelSnake();
+  70          
+  71          void victoryMelody();
+  72          void startGame();
+  73          void ending();
+  74          
+  75          void moveSnake()
+  76          {
+  77   1          unsigned char len;
+  78   1          len = snakeLength - 1;
+  79   1          for (len; len > 0; len--)
+  80   1          {
+  81   2              snakeX[len] = snakeX[len - 1];
+  82   2              snakeY[len] = snakeY[len - 1];
+  83   2          }
+  84   1          switch (direction)
+  85   1          {
+  86   2          case 0:
+  87   2              if (snakeY[0] == 7 && level != 3)
+  88   2              {
+  89   3                  if (level == 4)
+  90   3                  {
+  91   4                      snakeY[0] = 0;
+  92   4                      snakeX[0] = (snakeX[0] + 4) % 8;
+  93   4                  }
+  94   3                  else
+  95   3                  {
+  96   4                      snakeY[0] = 0;
+  97   4                  }
+  98   3              }
+  99   2              else
+ 100   2              {
+ 101   3                  snakeY[0]++;
+ 102   3              }
+ 103   2              break;
+ 104   2          case 1:
+ 105   2              if (snakeY[0] == 0 && level != 3)
+ 106   2              {
+ 107   3                  if (level == 4)
+ 108   3                  {
+ 109   4                      snakeY[0] = 7;
+ 110   4                      snakeX[0] = (snakeX[0] + 4) % 8;
+ 111   4                  }
+ 112   3                  else
+ 113   3                  {
+ 114   4                      snakeY[0] = 7;
+ 115   4                  }
+ 116   3              }
+C51 COMPILER V9.60.0.0   SADD                                                              12/13/2023 16:07:46 PAGE 3   
+
+ 117   2              else
+ 118   2              {
+ 119   3                  snakeY[0]--;
+ 120   3              }
+ 121   2              break;
+ 122   2          case 2:
+ 123   2              if (snakeX[0] == 7 && level != 3)
+ 124   2              {
+ 125   3                  if (level == 4)
+ 126   3                  {
+ 127   4                      snakeX[0] = 0;
+ 128   4                      snakeY[0] = (snakeY[0] + 4) % 8;
+ 129   4                  }
+ 130   3                  else
+ 131   3                  {
+ 132   4                      snakeX[0] = 0;
+ 133   4                  }
+ 134   3              }
+ 135   2              else
+ 136   2              {
+ 137   3                  snakeX[0]++;
+ 138   3              }
+ 139   2              break;
+ 140   2          case 3:
+ 141   2              if (snakeX[0] == 0 && level != 3)
+ 142   2              {
+ 143   3                  if (level == 4)
+ 144   3                  {
+ 145   4                      snakeX[0] = 7;
+ 146   4                      snakeY[0] = (snakeY[0] + 4) % 8;
+ 147   4                  }
+ 148   3                  else
+ 149   3                  {
+ 150   4                      snakeX[0] = 7;
+ 151   4                  }
+ 152   3              }
+ 153   2              else
+ 154   2              {
+ 155   3                  snakeX[0]--;
+ 156   3              }
+ 157   2              break;
+ 158   2          }
+ 159   1          snakeGrow();
+ 160   1          if (level != 1)
+ 161   1          {
+ 162   2              snakeDeath();
+ 163   2          }
+ 164   1      }
+ 165          
+ 166          void controlSnake()
+ 167          {
+ 168   1          if (direction == 0 || direction == 1)
+ 169   1          {
+ 170   2              if (LEFT == 0)
+ 171   2              {
+ 172   3                  direction = 2;
+ 173   3              }
+ 174   2              if (RIGHT == 0)
+ 175   2              {
+ 176   3                  direction = 3;
+ 177   3              }
+ 178   2          }
+C51 COMPILER V9.60.0.0   SADD                                                              12/13/2023 16:07:46 PAGE 4   
+
+ 179   1          if (direction == 2 || direction == 3)
+ 180   1          {
+ 181   2              if (UP == 0)
+ 182   2              {
+ 183   3                  direction = 0;
+ 184   3              }
+ 185   2              if (DOWN == 0)
+ 186   2              {
+ 187   3                  direction = 1;
+ 188   3              }
+ 189   2          }
+ 190   1      }
+ 191          
+ 192          void displaySnake()
+ 193          {
+ 194   1          unsigned char i;
+ 195   1          for (i = 0; i < snakeLength; i++)
+ 196   1          {
+ 197   2              Hc595SendByte(ROW[snakeY[i]]);
+ 198   2              COMMONPORTS = COL[snakeX[i]];
+ 199   2              delay(80);
+ 200   2              COMMONPORTS = 0xFF;
+ 201   2              Hc595SendByte(ROW[foodY]);
+ 202   2              COMMONPORTS = COL[foodX];
+ 203   2              delay(80);
+ 204   2              COMMONPORTS = 0xFF;
+ 205   2          }
+ 206   1      }
+ 207          
+ 208          char snakeInit()
+ 209          {
+ 210   1          snakeLength = 1;
+ 211   1          // snakeX[0] = rand() % 8;
+ 212   1          // snakeY[0] = rand() % 8;
+ 213   1          snakeX[0] = 4;
+ 214   1          snakeY[0] = 2;
+ 215   1          return snakeLength, snakeX[0], snakeY[0];
+ 216   1      }
+ 217          
+ 218          char snakeFood()
+ 219          {
+ 220   1          unsigned char i;
+ 221   1          // srand((int)time(0));
+ 222   1          foodX = rand() % 8;
+ 223   1          foodY = rand() % 8;
+ 224   1          for (i = 0; i < snakeLength; i++)
+ 225   1          {
+ 226   2              if (foodX == snakeX[i] && foodY == snakeY[i])
+ 227   2              {
+ 228   3                  return snakeFood();
+ 229   3              }
+ 230   2          }
+ 231   1          return foodX, foodY;
+ 232   1      }
+ 233          
+ 234          void eatBeep(int frequency, int duration)
+ 235          {
+ 236   1          unsigned int i;
+ 237   1          for (i = 0; i < duration; i++)
+ 238   1          {
+ 239   2              beep = 1;
+ 240   2              delay(frequency);
+C51 COMPILER V9.60.0.0   SADD                                                              12/13/2023 16:07:46 PAGE 5   
+
+ 241   2              beep = 0;
+ 242   2              delay(frequency);
+ 243   2          }
+ 244   1      }
+ 245          
+ 246          void victoryMelody()
+ 247          {
+ 248   1          // Giai điệu chiến thắng với khoảng 10 nhịp
+ 249   1          unsigned char melody[] = {200, 150, 100, 150}; // Thời gian mỗi nhịp
+ 250   1          unsigned char i, j;
+ 251   1      
+ 252   1          for (j = 0; j < 5; j++)
+ 253   1          {
+ 254   2              for (i = 0; i < 50; i++)
+ 255   2              {
+ 256   3                  beep = 1;
+ 257   3                  delay(melody[j]);
+ 258   3                  beep = 0;
+ 259   3                  delay(melody[j]);
+ 260   3              }
+ 261   2          }
+ 262   1      }
+ 263          
+ 264          void snakeGrow()
+ 265          {
+ 266   1          if (snakeX[0] == foodX && snakeY[0] == foodY)
+ 267   1          {
+ 268   2              snakeFood();
+ 269   2              eatBeep(100, 50);
+ 270   2              snakeX[snakeLength] = snakeX[snakeLength - 1];
+ 271   2              snakeY[snakeLength] = snakeY[snakeLength - 1];
+ 272   2              snakeLength++;
+ 273   2              switch (level)
+ 274   2              {
+ 275   3              case 1:
+ 276   3                  score += 1;
+ 277   3                  if (snakeLength % 3 == 0 && timecount > 20000)
+ 278   3                      timecount -= 2000;
+ 279   3                  if (score == 5)
+ 280   3                  {
+ 281   4                      delay(5000);
+ 282   4                      loading();
+ 283   4                      ending();
+ 284   4                      displayLevel(level);
+ 285   4                      //delay(10000);
+ 286   4                      level++;
+ 287   4                      score = 0;
+ 288   4                      timecount=40000;
+ 289   4                      controlSnake();
+ 290   4                      displaySnake();
+ 291   4                  }
+ 292   3                  break;
+ 293   3              case 2:
+ 294   3                  score += 1;
+ 295   3                  if (snakeLength % 3 == 0 && timecount > 10000)
+ 296   3                      timecount -= 3000;
+ 297   3                  break;
+ 298   3              case 3:
+ 299   3                  score += 1;
+ 300   3                  if (snakeLength % 2 == 0 && timecount > 7000)
+ 301   3                      timecount -= 4000;
+ 302   3                  break;
+C51 COMPILER V9.60.0.0   SADD                                                              12/13/2023 16:07:46 PAGE 6   
+
+ 303   3              case 4:
+ 304   3                  score += 1;
+ 305   3                  if (snakeLength % 2 == 0 && timecount > 7000)
+ 306   3                      timecount -= 4000;
+ 307   3                  break;
+ 308   3              default:
+ 309   3                  break;
+ 310   3              }
+ 311   2              if (score == 8)
+ 312   2              {
+ 313   3                  loading();
+ 314   3                  victoryMelody();
+ 315   3                  displaySnakeLogo(win);
+ 316   3                  delay(200);
+ 317   3                  ending();
+ 318   3                  startGame();
+ 319   3              }
+ 320   2          }
+ 321   1      }
+ 322          
+ 323          void snakeDeath()
+ 324          {
+ 325   1          unsigned char i, temp;
+ 326   1          temp = 10;
+ 327   1          for (i = 4; i < snakeLength; i++)
+ 328   1          {
+ 329   2              if (snakeX[0] == snakeX[i] && snakeY[0] == snakeY[i])
+ 330   2              {
+ 331   3                  while (LEFT == 1)
+ 332   3                  {
+ 333   4                      loading();
+ 334   4                      while (temp--)
+ 335   4                      {
+ 336   5                          eatBeep(100, 50);
+ 337   5                          delay(10000);
+ 338   5                      }
+ 339   4                      ending();
+ 340   4                  }
+ 341   3                  startGame();
+ 342   3              }
+ 343   2          }
+ 344   1          if (level == 3)
+ 345   1          {
+ 346   2              if (snakeX[0] > 7 || snakeY[0] > 7)
+ 347   2              {
+ 348   3                  while (LEFT == 1)
+ 349   3                  {
+ 350   4                      loading();
+ 351   4                      while (temp--)
+ 352   4                      {
+ 353   5                          eatBeep(100, 50);
+ 354   5                          delay(1000);
+ 355   5                      }
+ 356   4                      ending();
+ 357   4                  }
+ 358   3                  startGame();
+ 359   3              }
+ 360   2          }
+ 361   1      }
+ 362          
+ 363          void startGame()
+ 364          {
+C51 COMPILER V9.60.0.0   SADD                                                              12/13/2023 16:07:46 PAGE 7   
+
+ 365   1          UP = DOWN = LEFT = RIGHT = 1;
+ 366   1          score = 0;
+ 367   1          timecount = 40000;
+ 368   1          levelSnake();
+ 369   1          timeInit();
+ 370   1          snakeFood();
+ 371   1      }
+ 372          
+ 373          void ending()
+ 374          {
+ 375   1          unsigned char i, div_score, mod;
+ 376   1          while (LEFT == 1)
+ 377   1          {
+ 378   2              div_score = score;
+ 379   2              // SEGs = (SEGs << 2) | 3;
+ 380   2              for (i = 0; i < 3; i++)
+ 381   2              {
+ 382   3                  mod = div_score % 10;
+ 383   3                  SEGs = (1 << (i + 2));
+ 384   3                  COMMONPORTS = DIG_CODE[mod];
+ 385   3                  delay(200);
+ 386   3                  div_score /= 10;
+ 387   3              }
+ 388   2          }
+ 389   1          snakeInit();
+ 390   1      }
+ 391          
+ 392          void displaySnakeLogo(unsigned char dis[])
+ 393          {
+ 394   1          unsigned int i, j;
+ 395   1          while (LEFT == 1)
+ 396   1          {
+ 397   2              for (j = 0; j < 50; j++)
+ 398   2              {
+ 399   3                  for (i = 0; i < 8; i++)
+ 400   3                  {
+ 401   4                      Hc595SendByte(0x00);
+ 402   4                      COMMONPORTS = COL[i];
+ 403   4                      Hc595SendByte(dis[i]);
+ 404   4                      delay(2);
+ 405   4                  }
+ 406   3              }
+ 407   2          }
+ 408   1      }
+ 409          
+ 410          void displayLevel(unsigned char lev)
+ 411          {
+ 412   1          unsigned char i, j;
+ 413   1      
+ 414   1          for (j = 0; j < 50; j++)
+ 415   1          {
+ 416   2              for (i = 0; i < 8; i++)
+ 417   2              {
+ 418   3                  Hc595SendByte(0x00);
+ 419   3                  COMMONPORTS = COL[i];
+ 420   3                  Hc595SendByte(levelcode[lev][i]);
+ 421   3                  delay(2);
+ 422   3              }
+ 423   2          }
+ 424   1      }
+ 425          
+ 426          void levelSnake()
+C51 COMPILER V9.60.0.0   SADD                                                              12/13/2023 16:07:46 PAGE 8   
+
+ 427          {
+ 428   1          unsigned char lev, dState, uState;
+ 429   1          lev = dState = uState = 0;
+ 430   1          while (RIGHT == 1)
+ 431   1          {
+ 432   2              displayLevel(lev);
+ 433   2              if (DOWN == 0)
+ 434   2              {
+ 435   3                  if (dState == 0)
+ 436   3                  {
+ 437   4                      lev++;
+ 438   4                      if (lev > 3)
+ 439   4                          lev = 0;
+ 440   4                      dState = 1;
+ 441   4                  }
+ 442   3                  else
+ 443   3                  {
+ 444   4                      dState = 0;
+ 445   4                  }
+ 446   3              }
+ 447   2              if (UP == 0)
+ 448   2              {
+ 449   3                  if (uState == 0)
+ 450   3                  {
+ 451   4                      lev--;
+ 452   4                      if (lev == 255)
+ 453   4                          lev = 3;
+ 454   4                      uState = 1;
+ 455   4                  }
+ 456   3                  else
+ 457   3                  {
+ 458   4                      uState = 0;
+ 459   4                  }
+ 460   3              }
+ 461   2          }
+ 462   1          switch (lev)
+ 463   1          {
+ 464   2          case 0:
+ 465   2              level = 1;
+ 466   2              loading();
+ 467   2              break;
+ 468   2          case 1:
+ 469   2              level = 2;
+ 470   2              loading();
+ 471   2              break;
+ 472   2          case 2:
+ 473   2              level = 3;
+ 474   2              loading();
+ 475   2              break;
+ 476   2          case 3:
+ 477   2              level = 4;
+ 478   2              loading();
+ 479   2              break;
+ 480   2          default:
+ 481   2              break;
+ 482   2          }
+ 483   1      }
+ 484          
+ 485          void loading()
+ 486          {
+ 487   1          unsigned i, j, temp;
+ 488   1          temp = 255;
+C51 COMPILER V9.60.0.0   SADD                                                              12/13/2023 16:07:46 PAGE 9   
+
+ 489   1          for (i = 0; i < 30; i++)
+ 490   1          {
+ 491   2              Hc595SendByte(0x00);
+ 492   2              temp = temp >> 1;
+ 493   2              COMMONPORTS = temp;
+ 494   2              // delay(30);
+ 495   2              for (j = 0; j < 20; j++)
+ 496   2              {
+ 497   3                  Hc595SendByte(0x18);
+ 498   3                  delay(2);
+ 499   3              }
+ 500   2              delay(10000);
+ 501   2          }
+ 502   1      }
+ 503          
+ 504          void delay(unsigned int time)
+ 505          {
+ 506   1          while (time--)
+ 507   1              ;
+ 508   1      }
+ 509          
+ 510          void timeInit()
+ 511          {
+ 512   1          TMOD = 0X01;
+ 513   1          TH0 = 0X3C;
+ 514   1          TL0 = 0XB0;
+ 515   1          EA = 1;
+ 516   1          ET0 = 1;
+ 517   1          TR0 = 1;
+ 518   1      }
+ 519          
+ 520          void refreshSnake() interrupt 1
+ 521          {
+ 522   1          TH0 = (65536 - timecount) / 256;
+ 523   1          TH1 = (65536 - timecount) % 256;
+ 524   1          count++;
+ 525   1          if (count == 20)
+ 526   1          {
+ 527   2              count = 0;
+ 528   2              moveSnake();
+ 529   2          }
+ 530   1      }
+ 531          
+ 532          void Hc595SendByte(unsigned char dat)
+ 533          {
+ 534   1          unsigned char a;
+ 535   1          SRCLK = 0;
+ 536   1          RCLK = 0;
+ 537   1          for (a = 0; a < 8; a++)
+ 538   1          {
+ 539   2              SER = dat >> 7;
+ 540   2              dat <<= 1;
+ 541   2      
+ 542   2              SRCLK = 1;
+ 543   2              _nop_();
+ 544   2              _nop_();
+ 545   2              SRCLK = 0;
+ 546   2          }
+ 547   1          RCLK = 1;
+ 548   1          _nop_();
+ 549   1          _nop_();
+ 550   1          RCLK = 0;
+C51 COMPILER V9.60.0.0   SADD                                                              12/13/2023 16:07:46 PAGE 10  
+
+ 551   1      }
+ 552          
+ 553          void main()
+ 554          {
+ 555   1          displaySnakeLogo(logo);
+ 556   1          delay(2000);
+ 557   1          startGame();
+ 558   1          while (1)
+ 559   1          {
+ 560   2              controlSnake();
+ 561   2              displaySnake();
+ 562   2          }
+ 563   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1699    ----
+   CONSTANT SIZE    =     78    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     71      38
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

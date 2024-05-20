@@ -1,0 +1,3 @@
+".\Objects\sadd.obj" 
+TO ".\Objects\sadd" 
+PRINT(".\Listings\sadd.m51") RAMSIZE(256) 
